@@ -1,7 +1,4 @@
-use std::{
-    io::{self, ErrorKind},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use crate::{
     Context, Error,
@@ -36,8 +33,7 @@ pub async fn input(
     }
 
     let database = &ctx.data().database;
-    let min_inputs = ctx.data().min_inputs;
-    if database.inputs_count(day).await? >= min_inputs {
+    if database.inputs_count(day).await? >= 3 {
         ctx.say("There's enough inputs for today! Thank you anyway!")
             .await?;
         return Ok(());
@@ -46,7 +42,7 @@ pub async fn input(
     let user = ctx.author().id;
     let input = file.download().await?;
 
-    let (_, inputs) = database.fetch_inputs(day, min_inputs).await?;
+    let (_, inputs) = database.fetch_inputs(day, 3).await?;
     if inputs.iter().any(|i| *i == input) {
         ctx.say("Already have this input! Thank you anyway!")
             .await?;

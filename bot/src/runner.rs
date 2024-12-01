@@ -1,18 +1,11 @@
 use std::process::Stdio;
 
-use poise::serenity_prelude::{Context, CreateMessage, Http, UserId, futures::channel::oneshot};
-use tokio::{
-    io::{AsyncWriteExt, BufReader},
-    process::Command,
-    task::JoinSet,
-};
+use poise::serenity_prelude::{CreateMessage, Http, UserId, futures::channel::oneshot};
+use tokio::{io::BufReader, process::Command, task::JoinSet};
 use tokio_util::io::SyncIoBridge;
 use worker::{Request, Response};
 
 use crate::{Data, Error};
-
-pub const MIN_INPUTS: usize = 3;
-pub const MIN_SOLUTIONS_PER_INPUT: usize = 3;
 
 pub async fn handle_benchmark(
     http: &Http,

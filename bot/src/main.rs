@@ -20,8 +20,6 @@ pub struct Data {
     database: Database,
     input_watch: watch::Sender<u8>,
     consensus_watch: watch::Sender<i64>,
-    min_inputs: usize,
-    min_solutions: usize,
 }
 
 #[poise::command(slash_command)]
@@ -36,10 +34,6 @@ async fn main() {
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
 
     let db_path = env::var("DATABASE_PATH").unwrap_or_else(|_| database::DEFAULT_PATH.into());
-
-    let min_inputs = env::var("MIN_INPUTS").map_or(runner::MIN_INPUTS, |s| s.parse().unwrap());
-    let min_solutions =
-        env::var("MIN_SOLUTIONS").map_or(database::DEFAULT_MIN_SOLUTIONS, |s| s.parse().unwrap());
 
     let commands = vec![commands::aoc(), commands::input()];
 
@@ -70,8 +64,6 @@ async fn main() {
                     database,
                     input_watch,
                     consensus_watch,
-                    min_inputs,
-                    min_solutions,
                 }))
             })
         })

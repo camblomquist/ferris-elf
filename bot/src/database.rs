@@ -6,10 +6,9 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
 };
 
-use crate::{Error, runner::MIN_SOLUTIONS_PER_INPUT};
+use crate::Error;
 
 pub const DEFAULT_PATH: &str = "database.db";
-pub const DEFAULT_MIN_SOLUTIONS: usize = 3;
 
 pub struct Database(SqlitePool);
 
@@ -159,25 +158,17 @@ CREATE TABLE IF NOT EXISTS runs(
         Ok(res.get::<i64, _>(0) as _)
     }
 
-    pub async fn solutions_count(&self, day: u8, part: u8) -> Result<usize, Error> {
-        let res = sqlx::query("SELECT COUNT(*) FROM solutions WHERE day = ? AND part = ?")
-            .bind(day)
-            .bind(part)
-            .fetch_one(&self.0)
-            .await?;
-        Ok(res.get::<i64, _>(0) as _)
-    }
-
     pub async fn solution_consensus(&self, input_id: i64) -> Result<Option<i64>, Error> {
         let count: i64 = sqlx::query("SELECT COUNT(*) FROM solutions WHERE id = ?")
             .bind(input_id)
             .fetch_one(&self.0)
             .await?
             .get(0);
-        let majority = count / 2;
-        if majority < MIN_SOLUTIONS_PER_INPUT as i64 {
+        if count < 3 {
             return Ok(None);
         }
+        let majority = count / 2;
+        let majority = if majority >= 3 { majority } else { 3 };
 
         let res = sqlx::query(
             "SELECT answer, COUNT(answer) FROM solutions WHERE id = ? GROUP BY answer ORDER BY COUNT(answer) DESC",
