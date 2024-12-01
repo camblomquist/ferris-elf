@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, sync::Arc};
 
 use database::Database;
 use poise::serenity_prelude::{self as serenity};
@@ -14,7 +14,7 @@ mod runner;
 mod utils;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
-type Context<'a> = poise::Context<'a, Data, Error>;
+type Context<'a> = poise::Context<'a, Arc<Data>, Error>;
 
 pub struct Data {
     database: Database,
@@ -66,13 +66,13 @@ async fn main() {
                 let (input_watch, _) = watch::channel(0);
                 let (consensus_watch, _) = watch::channel(0);
 
-                Ok(Data {
+                Ok(Arc::new(Data {
                     database,
                     input_watch,
                     consensus_watch,
                     min_inputs,
                     min_solutions,
-                })
+                }))
             })
         })
         .options(options)

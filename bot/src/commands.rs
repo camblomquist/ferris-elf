@@ -1,8 +1,11 @@
-use std::io::{self, ErrorKind};
+use std::{
+    io::{self, ErrorKind},
+    sync::Arc,
+};
 
 use crate::{
     Context, Error,
-    runner::run_benchmark,
+    runner::handle_benchmark,
     utils::{aoc_today, get_name},
 };
 
@@ -13,7 +16,6 @@ use poise::{
         futures::{StreamExt, stream},
     },
 };
-use tokio::spawn;
 
 #[poise::command(slash_command, subcommands("input", "run", "leaderboard"))]
 pub async fn aoc(_: Context<'_>) -> Result<(), Error> {
@@ -44,7 +46,7 @@ pub async fn input(
     let user = ctx.author().id;
     let input = file.download().await?;
 
-    let inputs = database.fetch_inputs(day, min_inputs).await?;
+    let (_, inputs) = database.fetch_inputs(day, min_inputs).await?;
     if inputs.iter().any(|i| *i == input) {
         ctx.say("Already have this input! Thank you anyway!")
             .await?;
@@ -78,51 +80,14 @@ async fn run(
     };
 
     let user = ctx.author().id;
-    let database = &ctx.data().database;
 
     let code = file.download().await?;
 
-    let rid = database.insert_run(user, day, part, &code).await?;
+    let http = Arc::clone(&ctx.serenity_context().http);
+    let data = Arc::clone(ctx.data());
+    tokio::spawn(async move { handle_benchmark(&http, &data, user, day, part, code).await });
 
-    let mut input_watch = ctx.data().input_watch.subscribe();
-    let mut consensus_watch = ctx.data().consensus_watch.subscribe();
-    tokio::spawn(async move {
-        while database.inputs_count(day).await? < 3 {
-            input_watch.wait_for(|&d| day == d).await?;
-        }
-
-        let (ids, inputs) = database.fetch_inputs(day, 3).await?;
-
-        let res = run_benchmark(rid, inputs, code).await?;
-
-        if res.outputs.iter().any(|res| res.is_err()) {
-            // TODO: Whine about this
-            return Ok(());
-        }
-
-        let outputs = res.outputs.iter().map(|o| o.unwrap()).collect::<Vec<_>>();
-        for (&res, &id) in outputs.iter().zip(&ids) {
-            database.insert_solution(user, id, part, res).await?;
-        }
-
-        let mut avg_time = 0;
-        for ((&res, &id), &time) in outputs.iter().zip(&ids).zip(&res.times) {
-            while database.solution_consensus(id).await?.is_none() {
-                consensus_watch.wait_for(|&i| id == i).await?;
-            }
-            let consensus = database.solution_consensus(id).await?.unwrap();
-            if res != consensus {
-                // TODO: Whine that the answer is incorrect
-                return Ok(());
-            }
-            avg_time += time;
-        }
-        avg_time /= res.times.len() as u64;
-
-        database.update_run(rid, avg_time as _).await?;
-
-        Ok(())
-    });
+    ctx.say("Your submission has been queued.").await?;
 
     Ok(())
 }

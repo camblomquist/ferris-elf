@@ -1,6 +1,6 @@
 use std::process::Stdio;
 
-use poise::serenity_prelude::futures::channel::oneshot;
+use poise::serenity_prelude::{Context, CreateMessage, Http, UserId, futures::channel::oneshot};
 use tokio::{
     io::{AsyncWriteExt, BufReader},
     process::Command,
@@ -9,16 +9,84 @@ use tokio::{
 use tokio_util::io::SyncIoBridge;
 use worker::{Request, Response};
 
-use crate::Error;
+use crate::{Data, Error};
 
 pub const MIN_INPUTS: usize = 3;
 pub const MIN_SOLUTIONS_PER_INPUT: usize = 3;
 
-pub async fn run_benchmark(
-    id: i64,
-    inputs: Vec<Vec<u8>>,
+pub async fn handle_benchmark(
+    http: &Http,
+    data: &Data,
+    user: UserId,
+    day: u8,
+    part: u8,
     code: Vec<u8>,
-) -> Result<Response, Error> {
+) -> Result<(), Error> {
+    let database = &data.database;
+
+    let uuser = user.to_user(http).await?;
+
+    let rid = database.insert_run(user, day, part, &code).await?;
+
+    let mut input_watch = data.input_watch.subscribe();
+    let mut consensus_watch = data.consensus_watch.subscribe();
+
+    while database.inputs_count(day).await? < 3 {
+        input_watch.wait_for(|&d| day == d).await?;
+    }
+
+    let (ids, inputs) = database.fetch_inputs(day, 3).await?;
+
+    let res = run_container(rid, inputs, code).await?;
+
+    if let Some(Err(err)) = res.outputs.iter().find(|res| res.is_err()) {
+        uuser
+            .direct_message(
+                http,
+                CreateMessage::new().content(format!(
+                    "Run failed with the following output:\n```{err}```"
+                )),
+            )
+            .await?;
+        return Ok(());
+    }
+
+    let outputs = res
+        .outputs
+        .into_iter()
+        .map(|o| o.unwrap())
+        .collect::<Vec<_>>();
+    for (&res, &id) in outputs.iter().zip(&ids) {
+        database.insert_solution(user, id, part, res).await?;
+    }
+
+    let mut avg_time = 0;
+    for ((&res, &id), &time) in outputs.iter().zip(&ids).zip(&res.times) {
+        while database.solution_consensus(id).await?.is_none() {
+            consensus_watch.wait_for(|&i| id == i).await?;
+        }
+        let consensus = database.solution_consensus(id).await?.unwrap();
+        if res != consensus {
+            uuser
+                .direct_message(
+                    http,
+                    CreateMessage::new().content(format!(
+                        "The solution provided by your code did not match the consensus solution."
+                    )),
+                )
+                .await?;
+            return Ok(());
+        }
+        avg_time += time;
+    }
+    avg_time /= res.times.len() as u64;
+
+    database.update_run(rid, avg_time as _).await?;
+
+    Ok(())
+}
+
+async fn run_container(id: i64, inputs: Vec<Vec<u8>>, code: Vec<u8>) -> Result<Response, Error> {
     let name = format!("runner-{id}");
     let mut child = Command::new("docker")
         .args(&[
