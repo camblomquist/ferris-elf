@@ -1,13 +1,28 @@
 use std::env;
 
+use database::Database;
 use poise::serenity_prelude::{self as serenity};
 
-use tokio::signal::unix::{SignalKind, signal};
+use tokio::{
+    signal::unix::{SignalKind, signal},
+    sync::watch,
+};
+
+mod commands;
+mod database;
+mod runner;
+mod utils;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
-pub struct Data {}
+pub struct Data {
+    database: Database,
+    input_watch: watch::Sender<u8>,
+    consensus_watch: watch::Sender<i64>,
+    min_inputs: usize,
+    min_solutions: usize,
+}
 
 #[poise::command(slash_command)]
 async fn stub(_: Context<'_>) -> Result<(), Error> {
@@ -20,7 +35,13 @@ async fn main() {
 
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
 
-    let commands = vec![stub()];
+    let db_path = env::var("DATABASE_PATH").unwrap_or_else(|_| database::DEFAULT_PATH.into());
+
+    let min_inputs = env::var("MIN_INPUTS").map_or(runner::MIN_INPUTS, |s| s.parse().unwrap());
+    let min_solutions =
+        env::var("MIN_SOLUTIONS").map_or(database::DEFAULT_MIN_SOLUTIONS, |s| s.parse().unwrap());
+
+    let commands = vec![commands::aoc(), commands::input()];
 
     let options = poise::FrameworkOptions {
         commands,
@@ -30,6 +51,8 @@ async fn main() {
     let framework = poise::Framework::builder()
         .setup(move |_ctx, _ready, framework| {
             Box::pin(async move {
+                let database = Database::init(&db_path).await?;
+
                 let shard_manager = framework.shard_manager().clone();
                 tokio::spawn(async move {
                     let mut signal = signal(SignalKind::terminate()).unwrap();
@@ -39,7 +62,17 @@ async fn main() {
 
                     shard_manager.shutdown_all().await;
                 });
-                Ok(Data {})
+
+                let (input_watch, _) = watch::channel(0);
+                let (consensus_watch, _) = watch::channel(0);
+
+                Ok(Data {
+                    database,
+                    input_watch,
+                    consensus_watch,
+                    min_inputs,
+                    min_solutions,
+                })
             })
         })
         .options(options)
