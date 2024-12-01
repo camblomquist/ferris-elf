@@ -1,3 +1,4 @@
+use core::str;
 use std::{
     ffi::OsStr,
     io::{BufReader, BufWriter, Write},
@@ -99,7 +100,23 @@ async fn benchmark(inputs: &[Vec<u8>]) -> Result<(Vec<Result<i64, String>>, Vec<
         .output()
         .await?;
     if output.status.success() {
-        Ok((vec![Ok(0), Ok(0), Ok(0)], vec![0, 0, 0]))
+        let mut solutions = Vec::with_capacity(3);
+        let mut times = Vec::with_capacity(3);
+        let output = str::from_utf8(&output.stdout)?;
+        for line in output.lines() {
+            let line = line.trim_start();
+            let (thing, rest) = line.split_once(':').unwrap();
+            let rest = rest.trim();
+            match thing {
+                "Solution" => solutions.push(Ok(rest.parse().unwrap())),
+                "Instructions" => {
+                    let val = rest.split_once('|').unwrap().0;
+                    times.push(val.parse().unwrap());
+                }
+                _ => (),
+            }
+        }
+        Ok((solutions, times))
     } else {
         Err(String::from_utf8_lossy(&output.stderr).into())
     }
